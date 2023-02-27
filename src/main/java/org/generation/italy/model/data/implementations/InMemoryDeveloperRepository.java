@@ -6,11 +6,12 @@ import org.generation.italy.model.data.abstractions.DeveloperRepository;
 import org.generation.italy.model.entities.Competence;
 import org.generation.italy.model.entities.Developer;
 
+import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
 
 public class InMemoryDeveloperRepository implements DeveloperRepository {
-    private Map<Long, Developer> dataSource;
+    private static Map<Long, Developer> dataSource;
     private static long nextId;
 
     //Mostrare un elenco di tutti i Developer presenti nel repo e per ognuno
@@ -20,7 +21,8 @@ public class InMemoryDeveloperRepository implements DeveloperRepository {
         return dataSource.values().stream().toList();
     }
 
-    //Aggiungere un nuovo Developer con la possibilità di aggiungere opzionalmente delle Competenze
+    //Aggiungere un nuovo Developer
+    // (glielo chiede in UI) con la possibilità di aggiungere opzionalmente delle Competenze
     @Override
     public void addDeveloper(Developer dev) {
         dev.setId(++nextId);
@@ -32,58 +34,44 @@ public class InMemoryDeveloperRepository implements DeveloperRepository {
     }
 
 
-    public List<Map.Entry<Long, List<Competence>>> getDevsByCompetence(String part) {
-        return dataSource.values().stream().collect(Collectors.toMap(Developer::getId, Developer::getCompetences))
-                                            .entrySet()
-                                            .stream()
-                                            .filter(longListEntry -> longListEntry.getValue().stream()
-                                                    .filter(e -> e.getName().contains(part))
-                                                    .isParallel())
-                                            .toList();
+    public List<Developer> getDevsByCompetence(String part) {
+        return dataSource.values().stream()
+                .filter(d -> d.getCompetences().stream()
+                        .anyMatch(c -> c.getName().equalsIgnoreCase(part)))
+                .toList();
     }
 
     @Override
-    public List<Long> getDevsByCompetenceAndLevel(String part, Level level) {
-        return getDevsByCompetence(part).stream().filter(longListEntry -> longListEntry.getValue().stream()
-                                                    .filter(e -> e.getLevel().compareTo(level) >= 0)
-                                                    .isParallel())
-                                            .map(Map.Entry::getKey)
-                                            .toList();
+    public List<Developer> getDevsByCompetenceAndLevel(String part, Level level) {
+        return getDevsByCompetence(part).stream()
+                .filter(d -> d.getCompetences().stream()
+                        .anyMatch(c -> c.getLevel().compareTo(level) >= 0))
+                .toList();
     }
 
     @Override
-    public List<Long> getDevsByCompetenceNum(Integer num) {
-        return dataSource.values().stream().collect(Collectors.toMap(Developer::getId, Developer::getCompetences))
-                                            .entrySet()
-                                            .stream()
-                                            .filter(entry -> entry.getValue().size() >= num)
-                                            .map(Map.Entry::getKey)
-                                            .toList();
+    public List<Developer> getDevsByCompetenceNum(Integer num) {
+        return dataSource.values().stream()
+                .filter(d -> d.getCompetences().size() >= num)
+                .toList();
     }
 
     @Override
-    public List<Long> getDevsByCompetenceNumAndLevel(Integer num, Level level) {
-        return dataSource.values().stream().collect(Collectors.toMap(Developer::getId, Developer::getCompetences))
-                                            .entrySet()
-                                            .stream()
-                                            .filter(entry -> entry.getValue().size() >= num)
-                                            .filter(entry -> entry.getValue().stream()
-                                                    .filter(competence -> competence.getLevel().compareTo(level) >= 0)
-                                                    .isParallel())
-                                            .map(Map.Entry::getKey)
-                                            .toList();
+    public List<Developer> getDevsByCompetenceNumAndLevel(Integer num, Level level) {
+        return getDevsByCompetenceNum(num).stream()
+                .filter(d -> d.getCompetences().stream()
+                        .anyMatch(c -> c.getLevel().compareTo(level) >= 0))
+                .toList();
     }
 
     //Mostrare una lista dei nomi di tutte le Competenze tra tutti i Developer
     @Override
-    public Iterable<String> getAllCompetences() {
+    public Iterable<String> getAllCompetences() { // da rivedere col flatmap
         return dataSource.values().stream()
-                .map(Developer::getCompetences)
-                .map(list -> list.stream()
-                             .map(Competence::getName)
-                             .toString())
-                .distinct()
-                .toList();
+                                    .flatMap(d -> d.getCompetences().stream())
+                                    .map(Competence::getName)
+                                    .distinct()
+                                    .toList();
     }
 
     //Ricerca una Competenza data in input con match esatto, restituendo un true se è conosciuta
@@ -97,54 +85,62 @@ public class InMemoryDeveloperRepository implements DeveloperRepository {
     @Override
     public double getAverageSalary() {
         return dataSource.values().stream().mapToDouble(Developer::getSalary).sum()
-                / dataSource.values().stream().mapToDouble(Developer::getSalary).count();
+                / dataSource.size();
     }
 
     //Stampare il valore massimo tra gli stipendi dei Developer
     @Override
     public Optional<Double> getMaxSalary() {
-        return dataSource.values().stream().map(Developer::getSalary).max(Double::compareTo);
+        Optional<Double> max = dataSource.values().stream().map(Developer::getSalary).max(Double::compareTo);
+        if (max.isPresent()) return max;
+        return Optional.empty();
     }
 
-    public Double getMaleMinSalary() {
-        return dataSource.values().stream()
+    public Optional<Double> getMaleMinSalary() {
+        Optional<Double> min = dataSource.values().stream()
                 .filter(d -> d.getSex().equals(Sex.MALE))
                 .map(Developer::getSalary)
-                .min(Double::compareTo)
-                .get();
+                .min(Double::compareTo);
+        if (min.isPresent()) return min;
+        return Optional.empty();
     }
 
-    public Double getFemaleMaxSalary() {
-        return dataSource.values().stream()
+    public Optional<Double> getFemaleMaxSalary() {
+        Optional<Double> max =  dataSource.values().stream()
                 .filter(d -> d.getSex().equals(Sex.FEMALE))
                 .map(Developer::getSalary)
-                .max(Double::compareTo)
-                .get();
+                .max(Double::compareTo);
+        if (max.isPresent()) return max;
+        return Optional.empty();
     }
 
     @Override
-    public boolean isYourFirmSexist() {
-        if (getMaleMinSalary() > getFemaleMaxSalary()) {
-            return true;
+    public List<Developer> isYourFirmSexist() {
+        List<Developer> devsToFire = new ArrayList<>();
+        if (getMaleMinSalary().isPresent() && getFemaleMaxSalary().isPresent()) {
+            double maleMinSalary = getMaleMinSalary().get();
+            double femaleMaxSalary = getFemaleMaxSalary().get();
+            if (maleMinSalary < femaleMaxSalary) {
+                devsToFire = dataSource.values().stream()
+                        .filter(dev -> dev.getSex().equals(Sex.FEMALE))
+                        .filter(femaleDev -> femaleDev.getSalary() > maleMinSalary)
+                        .toList();
+                for (Developer dev : devsToFire) fireDeveloper(dev);
+            }
         }
-        List<Developer> idsToDelete = dataSource.values().stream()
-                .filter(dev -> dev.getSex().equals(Sex.FEMALE))
-                .filter(femaleDev -> femaleDev.getSalary() > getMaleMinSalary())
-                .toList();
-        for (Developer dev : idsToDelete) fireDeveloper(dev);
-        return false;
+        return devsToFire;
     }
 
     //Restituire la moda degli anni di lavoro dei miei Developer
     @Override
     public int getModeOfSeniority() {
-        return dataSource.values().stream()
+        Optional<LocalDate> entry = dataSource.values().stream()
                 .collect(Collectors.groupingBy(Developer::getRecruitmentYear, Collectors.counting()))
                 .entrySet()
                 .stream()
                 .max(Comparator.comparingLong(Map.Entry::getValue))
-                .map(Map.Entry::getKey)
-                .get()
-                .getYear();
+                .map(Map.Entry::getKey);
+        if (entry.isPresent()) return entry.get().getYear();
+        return 0;
     }
 }
